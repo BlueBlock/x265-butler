@@ -24,15 +24,16 @@ RUN npm run build
 # ---------- Stage 1b: ffmpeg-bin (BtbN static GPL build with libvmaf) ----------
 FROM debian:trixie-slim AS ffmpeg-bin
 ARG TARGETARCH
-ARG BTBN_TAG=autobuild-2026-05-10-13-12
-ARG BTBN_BUILD=N-124426-g5bbc00c05d
+ARG BTBN_TAG=autobuild-2026-06-07-13-55
+ARG BTBN_BUILD_AMD64=N-124868-gd1faab734d
+ARG BTBN_BUILD_ARM64=N-124867-g3137d337fe
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates wget xz-utils binutils \
  && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
     case "${TARGETARCH}" in \
-      amd64)   ARCH=linux64 ;; \
-      arm64)   ARCH=linuxarm64 ;; \
+      amd64)   ARCH=linux64; BTBN_BUILD="${BTBN_BUILD_AMD64}" ;; \
+      arm64)   ARCH=linuxarm64; BTBN_BUILD="${BTBN_BUILD_ARM64}" ;; \
       *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     wget -q -O /tmp/ffmpeg.tar.xz \
@@ -115,7 +116,7 @@ COPY --from=ffmpeg-bin /opt/ffmpeg/bin/ffmpeg  /usr/local/bin/ffmpeg
 COPY --from=ffmpeg-bin /opt/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
 COPY --from=ffmpeg-bin /opt/ffmpeg/LICENSE.GPL-3.0 /usr/share/doc/ffmpeg/LICENSE.GPL-3.0
 
-ARG BTBN_TAG=autobuild-2026-05-10-13-12
+ARG BTBN_TAG=autobuild-2026-06-07-13-55
 RUN chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
  && test -s /usr/share/doc/ffmpeg/LICENSE.GPL-3.0 \
  && printf 'https://github.com/BtbN/FFmpeg-Builds/releases/tag/%s\n' "${BTBN_TAG}" \
