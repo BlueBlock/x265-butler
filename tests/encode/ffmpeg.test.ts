@@ -160,17 +160,24 @@ describe('runEncode — progress parser', () => {
 });
 
 describe('runEncode — caps + abort + close-await', () => {
-  it('test_runEncode_when_stdout_exceeds_cap_then_kills_and_rejects', async () => {
+  it('test_runEncode_when_stdout_volume_exceeds_former_cap_then_parses_without_killing', async () => {
+    const events: ProgressEvent[] = [];
     const child = new FakeChild();
     spawnMock.mockReturnValueOnce(child);
-    const p = runEncode({ input: '/i', output: '/o', crf: 23 });
-    // 9 MiB of data — exceeds 8 MiB cap.
-    const huge = 'x'.repeat(9 * 1024 * 1024);
-    child.stdout.emit('data', huge);
-    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
-    // Audit M2: close MUST fire before promise settles.
-    child.emit('close', null);
-    await expect(p).rejects.toThrow(/stdout exceeded cap/);
+    const p = runEncode({ input: '/i', output: '/o', crf: 23, onProgress: (ev) => events.push(ev) });
+    // Emit well over the former 8 MiB cap as valid progress lines.
+    // Each group is ~60 bytes; 200 000 groups ≈ 12 MiB — previously fatal.
+    const group =
+      'frame=1000\nfps=25.0\nout_time_ms=40000000\ntotal_size=1048576\nprogress=continue\n';
+    for (let i = 0; i < 200_000; i++) {
+      child.stdout.emit('data', group);
+    }
+    // ffmpeg must never have been killed.
+    expect(child.kill).not.toHaveBeenCalled();
+    child.emit('close', 0);
+    const result = await p;
+    expect(result.exitCode).toBe(0);
+    expect(events.length).toBe(200_000);
   });
 
   it('test_runEncode_when_stderr_exceeds_tail_window_then_only_tail_kept', async () => {
@@ -224,11 +231,12 @@ describe('runEncode — caps + abort + close-await', () => {
     const child = new FakeChild();
     spawnMock.mockReturnValueOnce(child);
     let resolved = false;
-    const p = runEncode({ input: '/i', output: '/o', crf: 23 }).then(() => {
+    const ctrl = new AbortController();
+    const p = runEncode({ input: '/i', output: '/o', crf: 23, signal: ctrl.signal }).then(() => {
       resolved = true;
     });
-    // Trigger kill via stdout-cap exceeded.
-    child.stdout.emit('data', 'x'.repeat(9 * 1024 * 1024));
+    // Trigger kill via abort signal.
+    ctrl.abort();
     expect(child.kill).toHaveBeenCalled();
     // BEFORE close: promise must NOT have settled.
     await Promise.resolve();

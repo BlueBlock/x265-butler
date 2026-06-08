@@ -67,8 +67,10 @@ export type EncodeResult = {
   logTail: string;
 };
 
-// audit pattern from 01-03 ffprobe S2: byte caps prevent memory DoS.
-const STDOUT_CAP_BYTES = 8 * 1024 * 1024; // 8 MiB
+// audit pattern from 01-03 ffprobe S2: stderr tail caps prevent memory DoS.
+// stdout is safe without a cap because makeProgressParser is a streaming
+// parser that consumes and discards each line immediately; no accumulation
+// occurs regardless of job duration or progress-line volume.
 const STDERR_TAIL_BYTES = 16 * 1024; // 16 KiB sliding window
 const SIGKILL_GRACE_MS = 5000;
 
@@ -241,8 +243,6 @@ export async function runEncode(opts: EncodeOptions): Promise<EncodeResult> {
   return new Promise<EncodeResult>((resolve, reject) => {
     const child = spawn(ffmpegBinary(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
-    let stdoutBytes = 0;
-    let stdoutCapped = false;
     let stderrTail = Buffer.alloc(0);
     let aborted = false;
     let sigkillTimer: NodeJS.Timeout | null = null;
@@ -287,17 +287,6 @@ export async function runEncode(opts: EncodeOptions): Promise<EncodeResult> {
           } catch {
             // log-capture failure must not abort encoding
           }
-        }
-        if (stdoutCapped) return;
-        stdoutBytes += Buffer.byteLength(chunk, 'utf8');
-        if (stdoutBytes > STDOUT_CAP_BYTES) {
-          stdoutCapped = true;
-          try {
-            child.kill('SIGKILL');
-          } catch {
-            // child may already be gone
-          }
-          return;
         }
         if (parser) parser(chunk);
       });
@@ -369,10 +358,6 @@ export async function runEncode(opts: EncodeOptions): Promise<EncodeResult> {
       const durationMs = Date.now() - startMs;
       const logTail = stderrTail.toString('utf8');
 
-      if (stdoutCapped) {
-        safeReject(new Error('stdout exceeded cap'));
-        return;
-      }
       if (aborted) {
         safeReject(new AbortError('encode aborted'));
         return;
