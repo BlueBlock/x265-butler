@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/X265Butler.Agent.Contracts/X265Butler.Agent.Contracts.csproj" />
+    <Project Path="src/X265Butler.Agent.Worker/X265Butler.Agent.Worker.csproj" />
+  </Folder>
+</Solution>

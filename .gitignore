@@ -12,6 +12,10 @@ data/
 *.log
 *.tsbuildinfo
 
+# .NET build artifacts
+**/bin/
+**/obj/
+
 # 01-03: deterministic test fixtures generated at runtime — never commit
 tests/fixtures/scan/*.bin
 
