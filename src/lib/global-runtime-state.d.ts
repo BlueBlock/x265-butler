@@ -40,6 +40,7 @@ declare global {
   // for context — module-local flag accumulated listeners on every Next.js
   // dev hot-reload, triggering MaxListenersExceededWarning at the 11th cycle.
   var __x265butler_shutdown_registered: boolean | undefined;
+
 }
 
 export {};

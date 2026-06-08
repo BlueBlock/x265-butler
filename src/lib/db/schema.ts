@@ -248,6 +248,38 @@ export interface ScanResult {
   finishedAt: number;
 }
 
+export interface RemoteWorkerRow {
+  id: number;
+  worker_id: string;
+  display_name: string;
+  base_url: string;
+  capabilities_json: string;
+  last_seen_at: number;
+  lease_expires_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export type RemoteJobLeaseState =
+  | 'prepared'
+  | 'claimed'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface RemoteJobLeaseRow {
+  job_id: number;
+  worker_id: string;
+  lease_token: string;
+  state: RemoteJobLeaseState;
+  progress_percent: number | null;
+  message: string | null;
+  lease_expires_at: number;
+  created_at: number;
+  updated_at: number;
+}
+
 // 11-01: Encoder-Benchmark types — bench_run + bench_combo tables.
 
 export type BenchMode = 'native-sweep' | 'vmaf-anchored';

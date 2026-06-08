@@ -52,6 +52,8 @@ import { makeBlocklistRepo, type BlocklistRepo } from './repos/blocklist';
 import { makeUserRepo, type UserRepo } from './repos/user';
 import { makeShareRepo, type ShareRepo } from './repos/share';
 import { makeStorageRepo, type StorageRepo } from './repos/storage';
+import { makeRemoteWorkerRepo, type RemoteWorkerRepo } from './repos/remote-worker';
+import { makeRemoteJobLeaseRepo, type RemoteJobLeaseRepo } from './repos/remote-job-lease';
 // 14-01: re-export share types + nested-error so consumers import from
 // `@/src/lib/db` without depth-traversing into repos/.
 export type { ShareRow, ShareCreateInput, ShareUpdateInput } from './schema';
@@ -81,6 +83,8 @@ let _benchRunRepo: BenchRunRepo | null = null;
 let _benchComboRepo: BenchComboRepo | null = null;
 let _shareRepo: ShareRepo | null = null;
 let _storageRepo: StorageRepo | null = null;
+let _remoteWorkerRepo: RemoteWorkerRepo | null = null;
+let _remoteJobLeaseRepo: RemoteJobLeaseRepo | null = null;
 
 // 03-04 audit M2: EXPORTED so /api/stats route + Dashboard Server Component
 // resolve dbPath via single source of truth (NOT a duplicated env-default).
@@ -241,6 +245,16 @@ export function storageRepo(): StorageRepo {
   return _storageRepo;
 }
 
+export function remoteWorkerRepo(): RemoteWorkerRepo {
+  if (!_remoteWorkerRepo) _remoteWorkerRepo = makeRemoteWorkerRepo(getDb());
+  return _remoteWorkerRepo;
+}
+
+export function remoteJobLeaseRepo(): RemoteJobLeaseRepo {
+  if (!_remoteJobLeaseRepo) _remoteJobLeaseRepo = makeRemoteJobLeaseRepo(getDb());
+  return _remoteJobLeaseRepo;
+}
+
 // 11-01: bench repos — HMR-safe singletons per existing pattern.
 export function benchRunRepo(): BenchRunRepo {
   if (!_benchRunRepo) _benchRunRepo = makeBenchRunRepo(getDb());
@@ -266,6 +280,8 @@ export function __forTests_setDb(db: Db): void {
   _benchComboRepo = null;
   _shareRepo = null;
   _storageRepo = null;
+  _remoteWorkerRepo = null;
+  _remoteJobLeaseRepo = null;
 }
 
 export function __forTests_resetDb(): void {
@@ -288,4 +304,6 @@ export function __forTests_resetDb(): void {
   _benchComboRepo = null;
   _shareRepo = null;
   _storageRepo = null;
+  _remoteWorkerRepo = null;
+  _remoteJobLeaseRepo = null;
 }

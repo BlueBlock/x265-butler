@@ -34,6 +34,8 @@ export interface JobRepo {
   markFailed(id: number, input: JobFailInput): JobRow | null;
   // audit-added M2: terminal-state guard.
   markCancelled(id: number): JobRow | null;
+  markInterrupted(id: number, reason: string): JobRow | null;
+  requeueFromEncoding(id: number, reason: string): JobRow | null;
   // 05-09 audit M2: bulk cancel for /api/queue/cancel-all single-TX path.
   // Single SQL UPDATE with WHERE id IN (...) AND status IN ('queued','encoding').
   // Returns affected row count. Empty array = NO SQL execution → returns 0.
@@ -180,6 +182,19 @@ export function makeJobRepo(db: Db, deps?: JobRepoDeps): JobRepo {
     `UPDATE job SET status = 'cancelled', finished_at = ?
      WHERE id = ? AND status IN ('queued','encoding')`,
   );
+  const markInterruptedStmt = db.prepare(
+    `UPDATE job SET status = 'interrupted', finished_at = ?, error_msg = COALESCE(error_msg, ?)
+     WHERE id = ? AND status = 'encoding'`,
+  );
+  const requeueFromEncodingStmt = db.prepare(
+    `UPDATE job
+     SET status = 'queued',
+         started_at = NULL,
+         finished_at = NULL,
+         error_msg = COALESCE(error_msg, ?),
+         queue_position = COALESCE((SELECT MAX(queue_position) + 1 FROM job WHERE status = 'queued' AND id <> ?), 1)
+     WHERE id = ? AND status = 'encoding'`,
+  );
   const listActiveStmt = db.prepare<[], JobRow>(
     "SELECT * FROM job WHERE status IN ('queued','encoding') ORDER BY queue_position ASC, created_at ASC, id ASC",
   );
@@ -299,6 +314,18 @@ export function makeJobRepo(db: Db, deps?: JobRepoDeps): JobRepo {
 
   function markCancelled(id: number): JobRow | null {
     const result = markCancelledStmt.run(NOW_SECONDS(), id);
+    if (result.changes !== 1) return null;
+    return findByIdStmt.get(id) ?? null;
+  }
+
+  function markInterrupted(id: number, reason: string): JobRow | null {
+    const result = markInterruptedStmt.run(NOW_SECONDS(), reason, id);
+    if (result.changes !== 1) return null;
+    return findByIdStmt.get(id) ?? null;
+  }
+
+  function requeueFromEncoding(id: number, reason: string): JobRow | null {
+    const result = requeueFromEncodingStmt.run(reason, id, id);
     if (result.changes !== 1) return null;
     return findByIdStmt.get(id) ?? null;
   }
@@ -525,6 +552,8 @@ export function makeJobRepo(db: Db, deps?: JobRepoDeps): JobRepo {
     markCompleted,
     markFailed,
     markCancelled,
+    markInterrupted,
+    requeueFromEncoding,
     markCancelledBulk,
     cancelJobsAndPendFilesTx,
     listActive,
