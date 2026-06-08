@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using X265Butler.Agent.Contracts.Jobs;
 using X265Butler.Agent.Worker.Options;
@@ -16,6 +17,7 @@ public sealed class ButlerDispatchWorker : BackgroundService
     private readonly SmbPathMapper _pathMapper;
     private readonly AgentCapabilityService _capabilityService;
     private readonly JobValidationService _validationService;
+    private string? _resolvedBearerToken;
 
     public ButlerDispatchWorker(
         ILogger<ButlerDispatchWorker> logger,
@@ -52,7 +54,15 @@ public sealed class ButlerDispatchWorker : BackgroundService
 
             try
             {
-                var client = CreateClient(options);
+                var bearerToken = await ResolveBearerTokenAsync(options, stoppingToken);
+                if (string.IsNullOrWhiteSpace(bearerToken))
+                {
+                    _logger.LogWarning("Butler bearer token is not configured and enrollment could not resolve one. Waiting for next poll.");
+                    await DelaySeconds(Math.Max(3, options.PollIntervalSeconds), stoppingToken);
+                    continue;
+                }
+
+                var client = CreateClient(options, bearerToken);
 
                 var registerDue = DateTimeOffset.UtcNow >= lastRegisterUtc.AddSeconds(Math.Max(5, options.RegisterIntervalSeconds));
                 if (registerDue)
@@ -85,12 +95,149 @@ public sealed class ButlerDispatchWorker : BackgroundService
         _logger.LogInformation("Butler dispatch worker stopped.");
     }
 
-    private HttpClient CreateClient(ButlerOptions options)
+    private HttpClient CreateClient(ButlerOptions options, string bearerToken)
     {
         var client = _httpClientFactory.CreateClient("butler");
         client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", options.BearerToken);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
         return client;
+    }
+
+    private async Task<string?> ResolveBearerTokenAsync(ButlerOptions options, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(options.BearerToken) && !string.Equals(options.BearerToken, "change-me", StringComparison.OrdinalIgnoreCase))
+        {
+            _resolvedBearerToken = options.BearerToken;
+            return _resolvedBearerToken;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_resolvedBearerToken))
+        {
+            return _resolvedBearerToken;
+        }
+
+        if (string.IsNullOrWhiteSpace(options.EnrollmentToken))
+        {
+            return null;
+        }
+
+        var enrolledToken = await EnrollForBearerTokenAsync(options, cancellationToken);
+        if (string.IsNullOrWhiteSpace(enrolledToken))
+        {
+            return null;
+        }
+
+        _resolvedBearerToken = enrolledToken;
+        _logger.LogInformation("Resolved Butler bearer token via enrollment flow.");
+        return _resolvedBearerToken;
+    }
+
+    private async Task<string?> EnrollForBearerTokenAsync(ButlerOptions options, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient("butler");
+            client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
+
+            var agent = _agentOptions.CurrentValue;
+            var capabilities = await _capabilityService.GetReportAsync(cancellationToken);
+
+            using var response = await client.PostAsJsonAsync(
+                "api/remote-agents/enroll",
+                new
+                {
+                    enrollmentToken = options.EnrollmentToken,
+                    workerId = agent.AgentId,
+                    displayName = agent.DisplayName,
+                    machineName = Environment.MachineName,
+                    platform = Environment.OSVersion.Platform.ToString(),
+                    capabilities = new
+                    {
+                        ffmpegPath = capabilities.FfmpegPath,
+                        sharedStorageAccessible = capabilities.SharedStorageAccessible,
+                        encoders = capabilities.Encoders.Where(e => e.Available).Select(e => e.Id).ToArray(),
+                    },
+                },
+                cancellationToken);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.Accepted)
+            {
+                _logger.LogInformation("Enrollment request is pending operator approval.");
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("Enrollment failed ({StatusCode}): {Body}", (int)response.StatusCode, body);
+                return null;
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<EnrollmentResponse>(cancellationToken: cancellationToken);
+            if (string.IsNullOrWhiteSpace(payload?.Token))
+            {
+                _logger.LogWarning("Enrollment response did not include a bearer token.");
+                return null;
+            }
+
+            await PersistBearerTokenAsync(payload.Token, cancellationToken);
+            return payload.Token;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Enrollment request failed.");
+            return null;
+        }
+    }
+
+    private async Task PersistBearerTokenAsync(string bearerToken, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var appSettingsPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+            if (!File.Exists(appSettingsPath))
+            {
+                return;
+            }
+
+            var json = await File.ReadAllTextAsync(appSettingsPath, cancellationToken);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var patched = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in root.EnumerateObject())
+            {
+                if (string.Equals(property.Name, "Butler", StringComparison.OrdinalIgnoreCase))
+                {
+                    var butler = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var butlerProperty in property.Value.EnumerateObject())
+                    {
+                        butler[butlerProperty.Name] = butlerProperty.Value.ValueKind switch
+                        {
+                            JsonValueKind.String => butlerProperty.Value.GetString(),
+                            JsonValueKind.Number => butlerProperty.Value.GetDouble(),
+                            JsonValueKind.True => true,
+                            JsonValueKind.False => false,
+                            _ => butlerProperty.Value.GetRawText(),
+                        };
+                    }
+
+                    butler["BearerToken"] = bearerToken;
+                    butler["EnrollmentToken"] = string.Empty;
+                    patched[property.Name] = butler;
+                    continue;
+                }
+
+                patched[property.Name] = JsonSerializer.Deserialize<object>(property.Value.GetRawText());
+            }
+
+            var serialized = JsonSerializer.Serialize(patched, new JsonSerializerOptions { WriteIndented = true });
+            await File.WriteAllTextAsync(appSettingsPath, serialized, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist enrolled Butler bearer token to appsettings.json. Continuing with in-memory token.");
+        }
     }
 
     private async Task RegisterWorkerAsync(HttpClient client, CancellationToken cancellationToken)
@@ -730,3 +877,5 @@ public sealed class ButlerDispatchWorker : BackgroundService
         string ErrorMessage,
         string? LogTail);
 }
+
+internal sealed record EnrollmentResponse(string Token, string IssuedAtIso);

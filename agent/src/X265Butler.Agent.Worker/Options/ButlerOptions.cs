@@ -10,6 +10,8 @@ public sealed class ButlerOptions
 
     public string BearerToken { get; set; } = "change-me";
 
+    public string EnrollmentToken { get; set; } = string.Empty;
+
     public int PollIntervalSeconds { get; set; } = 5;
 
     public int RegisterIntervalSeconds { get; set; } = 30;

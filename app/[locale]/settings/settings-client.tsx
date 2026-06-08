@@ -27,6 +27,7 @@ import { BenchSettingsTab } from '@/components/bench/bench-settings-tab';
 // stays untouched (toggle owns its own PUT via /api/settings + audit M5 hook).
 import { AutoScanToggle } from '@/components/settings/auto-scan-toggle';
 import { AutoScanCard } from '@/components/settings/auto-scan-card';
+import { RemoteAgentApprovalsCard } from '@/components/settings/remote-agent-approvals-card';
 import type { AutoScanAdvancedInitial } from '@/components/settings/auto-scan-advanced';
 import { PageContainer, PageHeader } from '@/components/page-layout';
 import type { FormValues } from '@/src/lib/api/settings-serialize';
@@ -333,6 +334,7 @@ export function SettingsClient({
             <section id="auto-scan" className="scroll-mt-20">
               <AutoScanCard advancedInitial={autoScanAdvancedInitial} />
             </section>
+            <RemoteAgentApprovalsCard />
           </div>
         </TabsContent>
         <TabsContent value="bench" className="mt-6">

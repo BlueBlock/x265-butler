@@ -2,12 +2,18 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Serilog;
 using X265Butler.Agent.Contracts.Jobs;
 using X265Butler.Agent.Contracts.Paths;
 using X265Butler.Agent.Worker.Options;
 using X265Butler.Agent.Worker.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
+	.ReadFrom.Configuration(context.Configuration)
+	.ReadFrom.Services(services)
+	.Enrich.FromLogContext());
 
 builder.Host.UseWindowsService();
 

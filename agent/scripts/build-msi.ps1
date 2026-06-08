@@ -7,10 +7,14 @@ param(
     [string]$ServiceName = 'x265-butler-agent',
     [string]$ServiceDisplayName = 'x265-butler Agent',
     [string]$ServiceDescription = 'Windows-first remote GPU worker for x265-butler.',
+    [string]$ServiceAccount = 'LocalSystem',
+    [string]$ServicePassword = '',
     [string]$Configuration = 'Release',
     [string]$Runtime = 'win-x64',
     [string]$OutputDir = '',
     [string]$FfmpegSourcePath = '',
+    [string]$EnrollmentUrl = '',
+    [string]$EnrollmentToken = '',
     [switch]$BundleFfmpeg,
     [switch]$SelfContained
 )
@@ -52,7 +56,11 @@ function New-SafeId {
 }
 
 function Escape-Xml {
-    param([Parameter(Mandatory = $true)][string]$Text)
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
+
+    if ($null -eq $Text) {
+        return ''
+    }
 
     return [System.Security.SecurityElement]::Escape($Text)
 }
@@ -200,6 +208,35 @@ if ($bundleFfmpegEffective) {
     }
 }
 
+$publishedSettingsPath = Join-Path $publishRoot 'appsettings.json'
+if (Test-Path $publishedSettingsPath) {
+    $settings = Get-Content $publishedSettingsPath -Raw | ConvertFrom-Json
+    $modified = $false
+
+    if ($EnrollmentUrl -and $PSCmdlet.ShouldProcess($publishedSettingsPath, 'Set Butler base URL in appsettings')) {
+        if (-not $settings.Butler) {
+            $settings | Add-Member -MemberType NoteProperty -Name Butler -Value ([pscustomobject]@{})
+        }
+
+        $settings.Butler.BaseUrl = $EnrollmentUrl
+        $settings.Butler.Enabled = $true
+        $modified = $true
+    }
+
+    if ($EnrollmentToken -and $PSCmdlet.ShouldProcess($publishedSettingsPath, 'Set Butler enrollment token in appsettings')) {
+        if (-not $settings.Butler) {
+            $settings | Add-Member -MemberType NoteProperty -Name Butler -Value ([pscustomobject]@{})
+        }
+
+        $settings.Butler.EnrollmentToken = $EnrollmentToken
+        $modified = $true
+    }
+
+    if ($modified) {
+        $settings | ConvertTo-Json -Depth 20 | Set-Content -Path $publishedSettingsPath -Encoding UTF8
+    }
+}
+
 $exePath = Join-Path $publishRoot 'x265-butler-agent.exe'
 if (-not (Test-Path $exePath)) {
     if ($WhatIfPreference) {
@@ -301,7 +338,7 @@ foreach ($file in $files) {
     $componentLines.Add($fileLine)
 
     if ($file.Name -ieq 'x265-butler-agent.exe') {
-        $serviceInstallLine = [string]::Format('  <ServiceInstall Id="SvcInstall" Name="{0}" DisplayName="{1}" Description="{2}" Start="auto" Type="ownProcess" ErrorControl="normal" Vital="yes" />', (Escape-Xml -Text $ServiceName), (Escape-Xml -Text $ServiceDisplayName), (Escape-Xml -Text $ServiceDescription))
+        $serviceInstallLine = [string]::Format('  <ServiceInstall Id="SvcInstall" Name="{0}" DisplayName="{1}" Description="{2}" Start="auto" Type="ownProcess" ErrorControl="normal" Vital="yes" Account="[AGENT_SERVICE_ACCOUNT]" Password="[AGENT_SERVICE_PASSWORD]" />', (Escape-Xml -Text $ServiceName), (Escape-Xml -Text $ServiceDisplayName), (Escape-Xml -Text $ServiceDescription))
         $serviceControlLine = [string]::Format('  <ServiceControl Id="SvcControl" Name="{0}" Start="install" Stop="both" Remove="uninstall" Wait="yes" />', (Escape-Xml -Text $ServiceName))
         $componentLines.Add($serviceInstallLine)
         $componentLines.Add($serviceControlLine)
@@ -311,6 +348,17 @@ foreach ($file in $files) {
 }
 
 $componentXml = $componentLines -join "`n"
+
+$serviceAccountPropertyXml = [string]::Format('<Property Id="AGENT_SERVICE_ACCOUNT" Value="{0}" Secure="yes" />', (Escape-Xml -Text $ServiceAccount))
+if ([string]::IsNullOrWhiteSpace($ServicePassword)) {
+    $servicePasswordPropertyXml = '<Property Id="AGENT_SERVICE_PASSWORD" Secure="yes" />'
+}
+else {
+    $servicePasswordPropertyXml = [string]::Format('<Property Id="AGENT_SERVICE_PASSWORD" Value="{0}" Secure="yes" />', (Escape-Xml -Text $ServicePassword))
+}
+
+$serviceNameEscaped = Escape-Xml -Text $ServiceName
+$configureServiceArgsEscaped = Escape-Xml -Text "/c sc.exe config `"$ServiceName`" obj= `"[AGENT_SERVICE_ACCOUNT]`" password= `"[AGENT_SERVICE_PASSWORD]`""
 
 $wxs = @"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -325,12 +373,20 @@ $wxs = @"
     Language="1033">
     <MajorUpgrade DowngradeErrorMessage="A newer version of $(Escape-Xml -Text $ProductName) is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    $serviceAccountPropertyXml
+    $servicePasswordPropertyXml
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="x265-butler-agent">
 $directoryTreeXml
       </Directory>
     </StandardDirectory>
+
+        <CustomAction Id="ConfigureServiceAccount" Directory="SystemFolder" ExeCommand="cmd.exe $configureServiceArgsEscaped" Return="ignore" />
+
+        <InstallExecuteSequence>
+            <Custom Action="ConfigureServiceAccount" After="StartServices" Condition="NOT REMOVE AND AGENT_SERVICE_ACCOUNT AND AGENT_SERVICE_ACCOUNT &lt;&gt; &quot;LocalSystem&quot; AND AGENT_SERVICE_PASSWORD" />
+        </InstallExecuteSequence>
 
     <Feature Id="MainFeature" Title="$(Escape-Xml -Text $ProductName)" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
