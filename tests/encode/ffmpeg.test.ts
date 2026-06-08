@@ -159,7 +159,7 @@ describe('runEncode — progress parser', () => {
   });
 });
 
-describe('runEncode — caps + abort + close-await', () => {
+describe('runEncode — stdout volume + abort + close-await', () => {
   it('test_runEncode_when_stdout_volume_exceeds_former_cap_then_parses_without_killing', async () => {
     const events: ProgressEvent[] = [];
     const child = new FakeChild();
