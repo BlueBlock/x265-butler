@@ -158,6 +158,7 @@ public sealed class ButlerDispatchWorker : BackgroundService
         var options = _butlerOptions.CurrentValue;
         var job = claim.Job!;
         var lease = claim.Lease!;
+        var ffmpegPath = FfmpegPathResolver.Resolve(agent.FfmpegPath);
 
         var validation = _validationService.Validate(new ValidateJobRequest(job.SourcePath, job.CacheRoot));
         if (!validation.SourceExists || !validation.CacheRootExists || !validation.CacheRootWritable || !validation.FfmpegAvailable)
@@ -210,7 +211,7 @@ public sealed class ButlerDispatchWorker : BackgroundService
             lease,
             sourceLocalPath,
             outputLocalPath,
-            agent.FfmpegPath,
+            ffmpegPath,
             client,
             cancellationToken);
 

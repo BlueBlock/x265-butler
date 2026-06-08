@@ -21,6 +21,7 @@ public sealed class AgentCapabilityService
 
     public async Task<AgentCapabilityReport> GetReportAsync(CancellationToken cancellationToken)
     {
+        var ffmpegPath = FfmpegPathResolver.Resolve(_options.FfmpegPath);
         var ffmpegVersion = await ProbeFfmpegVersionAsync(cancellationToken);
         var ffmpegEncoders = await ProbeFfmpegEncodersAsync(cancellationToken);
         var nvidiaSmiAvailable = await CommandSucceedsAsync("nvidia-smi", "-L", cancellationToken);
@@ -32,7 +33,7 @@ public sealed class AgentCapabilityService
             _options.DisplayName,
             Environment.MachineName,
             RuntimeInformation.OSDescription,
-            _options.FfmpegPath,
+            ffmpegPath,
             ffmpegVersion,
             _pathMapper.SharedStorageAccessible,
             DateTimeOffset.UtcNow,
@@ -62,7 +63,8 @@ public sealed class AgentCapabilityService
     {
         try
         {
-            var startInfo = CreateStartInfo(_options.FfmpegPath, "-version");
+            var ffmpegPath = FfmpegPathResolver.Resolve(_options.FfmpegPath);
+            var startInfo = CreateStartInfo(ffmpegPath, "-version");
             using var process = Process.Start(startInfo);
             if (process is null)
             {
@@ -85,7 +87,8 @@ public sealed class AgentCapabilityService
 
         try
         {
-            var startInfo = CreateStartInfo(_options.FfmpegPath, "-hide_banner -encoders");
+            var ffmpegPath = FfmpegPathResolver.Resolve(_options.FfmpegPath);
+            var startInfo = CreateStartInfo(ffmpegPath, "-hide_banner -encoders");
             using var process = Process.Start(startInfo);
             if (process is null)
             {

@@ -64,9 +64,10 @@ public sealed class JobValidationService
     {
         try
         {
+            var ffmpegPath = FfmpegPathResolver.Resolve(_options.FfmpegPath);
             using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
             {
-                FileName = _options.FfmpegPath,
+                FileName = ffmpegPath,
                 Arguments = "-version",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

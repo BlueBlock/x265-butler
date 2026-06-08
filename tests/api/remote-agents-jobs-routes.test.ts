@@ -107,7 +107,10 @@ describe('remote-agent jobs claim/start/progress/complete routes', () => {
   });
 
   it('claim returns lease and job payload', async () => {
-    mockDb.remoteWorkerRepo.getActiveByWorkerId.mockReturnValue({ workerId: 'win-01' });
+    mockDb.remoteWorkerRepo.getActiveByWorkerId.mockReturnValue({
+      workerId: 'win-01',
+      capabilities: { encoders: ['libx265', 'hevc_nvenc'] },
+    });
     mockDb.jobRepo.claimNext.mockReturnValue({ id: 10, file_id: 22, encoder: 'nvenc' });
     mockDb.fileRepo.getById
       .mockReturnValueOnce({ id: 22, path: '/library/a.mkv', version: 2 })
@@ -137,7 +140,76 @@ describe('remote-agent jobs claim/start/progress/complete routes', () => {
     expect(body.job.sourcePath).toBe('/library/a.mkv');
     expect(body.job.outputPath).toBe('/library/a-x265.mkv');
     expect(body.job.outputContainer).toBe('mkv');
+    expect(body.job.encoder).toBe('nvenc');
     expect(body.lease.state).toBe('claimed');
+  });
+
+  it('claim resolves auto to nvenc when worker advertises nvenc', async () => {
+    mockDb.remoteWorkerRepo.getActiveByWorkerId.mockReturnValue({
+      workerId: 'win-01',
+      capabilities: { encoders: ['hevc_nvenc', 'libx265'] },
+    });
+    mockDb.jobRepo.claimNext.mockReturnValue({ id: 30, file_id: 40, encoder: 'auto' });
+    mockDb.fileRepo.getById
+      .mockReturnValueOnce({ id: 40, path: '/library/b.mkv', version: 1 })
+      .mockReturnValueOnce({ id: 40, path: '/library/b.mkv', version: 1 });
+    mockDb.remoteJobLeaseRepo.put.mockReturnValue({
+      job_id: 30,
+      worker_id: 'win-01',
+      lease_token: 'token',
+      state: 'claimed',
+      progress_percent: null,
+      message: null,
+      lease_expires_at: 1_800_000_000,
+      created_at: 0,
+      updated_at: 0,
+    });
+
+    const req = new Request('http://test/api/remote-agents/jobs/claim', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workerId: 'win-01' }),
+    });
+
+    const res = await claimPost(req);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.job.encoder).toBe('hevc_nvenc');
+    expect(body.job.ffmpegArgs).toContain('hevc_nvenc');
+  });
+
+  it('claim falls back to libx265 when nvenc is unavailable', async () => {
+    mockDb.remoteWorkerRepo.getActiveByWorkerId.mockReturnValue({
+      workerId: 'win-01',
+      capabilities: { encoders: ['libx265'] },
+    });
+    mockDb.jobRepo.claimNext.mockReturnValue({ id: 31, file_id: 41, encoder: 'hevc_nvenc' });
+    mockDb.fileRepo.getById
+      .mockReturnValueOnce({ id: 41, path: '/library/c.mkv', version: 1 })
+      .mockReturnValueOnce({ id: 41, path: '/library/c.mkv', version: 1 });
+    mockDb.remoteJobLeaseRepo.put.mockReturnValue({
+      job_id: 31,
+      worker_id: 'win-01',
+      lease_token: 'token',
+      state: 'claimed',
+      progress_percent: null,
+      message: null,
+      lease_expires_at: 1_800_000_000,
+      created_at: 0,
+      updated_at: 0,
+    });
+
+    const req = new Request('http://test/api/remote-agents/jobs/claim', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workerId: 'win-01' }),
+    });
+
+    const res = await claimPost(req);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.job.encoder).toBe('libx265');
+    expect(body.job.ffmpegArgs).toContain('libx265');
   });
 
   it('claim reconciles expired claimed lease by requeueing', async () => {

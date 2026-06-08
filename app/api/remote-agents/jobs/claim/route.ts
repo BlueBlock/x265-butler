@@ -82,6 +82,34 @@ function buildFfmpegArgs(encoder: string, crf: number | null, preset: string | n
   return args;
 }
 
+function workerEncoderSet(activeWorker: { capabilities?: Record<string, unknown> }): Set<string> {
+  const raw = activeWorker.capabilities?.encoders;
+  if (!Array.isArray(raw)) return new Set();
+
+  return new Set(
+    raw
+      .filter((v): v is string => typeof v === 'string')
+      .map((v) => v.trim().toLowerCase())
+      .filter((v) => v.length > 0),
+  );
+}
+
+function resolveDispatchEncoder(requested: string | null | undefined, activeWorker: { capabilities?: Record<string, unknown> }): string {
+  const requestedNormalized = (requested ?? 'auto').trim().toLowerCase();
+  const available = workerEncoderSet(activeWorker);
+
+  const hasNvenc = available.has('hevc_nvenc') || available.has('nvenc');
+  if (requestedNormalized === 'auto') {
+    return hasNvenc ? 'hevc_nvenc' : 'libx265';
+  }
+
+  if ((requestedNormalized === 'hevc_nvenc' || requestedNormalized === 'nvenc') && !hasNvenc) {
+    return 'libx265';
+  }
+
+  return requestedNormalized;
+}
+
 function reconcileExpiredLeases(): void {
   const expired = remoteJobLeaseRepo().listExpiredActive();
   for (const lease of expired) {
@@ -182,7 +210,7 @@ export async function POST(req: Request): Promise<Response> {
   const output = resolveOutputContract(file, job, settings);
   const preset = (job.preset_used ?? null) as string | null;
   const crf = job.crf ?? null;
-  const encoder = job.encoder ?? 'libx265';
+  const encoder = resolveDispatchEncoder(job.encoder, activeWorker);
   const ffmpegArgs = buildFfmpegArgs(encoder, crf, preset);
 
   return jsonResponse(

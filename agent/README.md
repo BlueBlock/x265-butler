@@ -15,6 +15,7 @@ Current scope:
 - Claim contract consumption for `outputPath`, `outputContainer`, `outputMode`, `crf`, `preset`, and `ffmpegArgs` templates
 - Lease heartbeat refresh during long-running ffmpeg jobs
 - Windows service install script
+- Windows MSI build script
 
 Current endpoints:
 
@@ -45,6 +46,26 @@ Windows service install:
 Set-Location C:\source\x265-butler\agent
 & .\scripts\install-windows-service.ps1 -WhatIf
 ```
+
+Build MSI installer:
+
+```powershell
+Set-Location C:\source\x265-butler\agent
+& .\scripts\build-msi.ps1 -WhatIf
+& .\scripts\build-msi.ps1 -ProductVersion 1.0.0 -BundleFfmpeg
+```
+
+MSI output path:
+
+- `C:\source\x265-butler\agent\artifacts\msi\x265-butler-agent-<version>-win-x64.msi`
+
+Notes:
+
+- MSI install root is `C:\Program Files\x265-butler-agent`.
+- Service is created as `x265-butler-agent` and starts automatically.
+- WiX CLI is pinned via local tool manifest: `C:\source\x265-butler\agent\dotnet-tools.json`.
+- With `-BundleFfmpeg`, installer payload includes ffmpeg binaries and config points to bundled `ffmpeg\\ffmpeg.exe`.
+- If ffmpeg is not on PATH, pass `-FfmpegSourcePath "C:\path\to\ffmpeg\bin"`.
 
 Butler dispatch config (`appsettings.json`, section `Butler`):
 
