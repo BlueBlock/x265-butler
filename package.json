@@ -1,6 +1,6 @@
 {
   "name": "x265-butler",
-  "version": "2.25.0",
+  "version": "2.25.1",
   "private": true,
   "type": "module",
   "description": "Self-hosted HEVC transcoding butler for unRAID",
